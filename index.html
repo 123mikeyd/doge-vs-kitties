@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Doge vs Crypto Kitties — Artillery Showdown</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; overflow: hidden; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+#ui {
+    position: absolute; top: 10px; left: 0; width: 100%;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 0 20px; pointer-events: none; z-index: 10;
+}
+#wind-box {
+    background: rgba(0,0,0,0.7); border: 2px solid #555; border-radius: 8px;
+    padding: 8px 16px; color: #fff; font-size: 14px; text-align: center;
+}
+#turn-box {
+    background: rgba(0,0,0,0.7); border: 2px solid #ffd700; border-radius: 8px;
+    padding: 8px 16px; color: #ffd700; font-size: 16px; text-align: center;
+    font-weight: bold;
+}
+#power-bar-container {
+    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+    width: 200px; height: 20px; background: rgba(0,0,0,0.7);
+    border: 2px solid #fff; border-radius: 10px; overflow: hidden;
+    display: none; z-index: 10;
+}
+#power-bar {
+    height: 100%; width: 0%; background: linear-gradient(90deg, #0f0, #ff0, #f00);
+    transition: none;
+}
+#controls-help {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.5); font-size: 12px; text-align: center;
+    pointer-events: none; z-index: 10;
+}
+#game-over {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    display: none; z-index: 20; text-align: center;
+}
+#game-over h1 { font-size: 48px; margin-bottom: 20px; text-shadow: 0 0 20px currentColor; }
+#game-over button {
+    font-family: 'Courier New', monospace; font-size: 20px; padding: 10px 30px;
+    border: 2px solid; border-radius: 8px; cursor: pointer;
+    background: rgba(0,0,0,0.8); margin-top: 10px; pointer-events: all;
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="ui">
+    <div id="wind-box">Wind: <span id="wind-val">→ 0</span></div>
+    <div id="turn-box"><span id="turn-label">DOGE TEAM</span> — <span id="timer">30</span>s</div>
+    <div id="wind-box" style="visibility:hidden">spacer</div>
+</div>
+<div id="power-bar-container"><div id="power-bar"></div></div>
+<div id="controls-help">A/D Move &nbsp;|&nbsp; Space = Jump &nbsp;|&nbsp; Space×2 = Backflip &nbsp;|&nbsp; Mouse Aim + Click-Hold-Release = Fire &nbsp;|&nbsp; Enter = End Turn</div>
+<div id="game-over">
+    <h1 id="winner-text">DOGE WINS!</h1>
+    <button id="restart-btn" onclick="initGame()">Play Again</button>
+</div>
+
+<script>
+// ============================================================
+// DOGE VS CRYPTO KITTIES — Artillery Showdown
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// Responsive canvas
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+const GRAVITY = 400;
+const MOVE_SPEED = 120;
+const MOVE_BUDGET = 200; // pixels per turn
+const TURN_TIME = 30; // seconds
+const EXPLOSION_RADIUS = 40;
+const EXPLOSION_DAMAGE = 35;
+const WORM_RADIUS = 14;
+const WATER_HEIGHT = 60;
+const AIM_SPEED = 1.5; // radians per second
+const MAX_LAUNCH_SPEED = 700;
+const MIN_LAUNCH_SPEED = 150;
+const JUMP_FORCE = 280;
+const BACKFLIP_FORCE = 380;
+const JUMP_FORWARD = 180;
+const BACKFLIP_BACK = 80;
+
+// ============================================================
+// GAME STATE
+// ============================================================
+let terrain = []; // heightmap: terrain[x] = y of ground surface
+let teams = []; // [{name, color, accent, emoji, worms: [{x, y, hp, maxHp, alive}]}]
+let currentTeam = 0;
+let currentWorm = [0, 0]; // index per team
+let aimAngle = -Math.PI / 4; // default aim up-left or up-right
+let charging = false;
+let chargeStart = 0;
+let chargePower = 0;
+let projectiles = [];
+let explosions = []; // visual
+let floatingTexts = [];
+let turnTimer = TURN_TIME;
+let moveUsed = 0;
+let gameState = 'aiming'; // aiming, firing, waiting, gameOver
+let wind = 0;
+let keys = {};
+let lastTime = 0;
+let cameraPanX = 0; // for following projectiles
+let cameraPanTarget = 0;
+let shakeTimer = 0;
+let shakeIntensity = 0;
+
+// Jump state
+let jumpVY = 0;
+let jumpVX = 0;
+let isAirborne = false;
+let lastSpaceTime = 0;
+const DOUBLE_TAP_MS = 300;
+let facingDir = 1; // 1 = right, -1 = left
+
+// Mouse aim + fire
+let mouseX = 0;
+let mouseY = 0;
+let mouseDown = false;
+let mouseChargeStart = 0;
+let mousePower = 0;
+
+// ============================================================
+// TERRAIN GENERATION
+// ============================================================
+function generateTerrain() {
+    terrain = [];
+    const W = canvas.width;
+    const H = canvas.height;
+    const groundBase = H * 0.55;
+    const amplitude = H * 0.15;
+
+    // Layered sine waves for organic hills
+    const freq1 = 0.003 + Math.random() * 0.002;
+    const freq2 = 0.008 + Math.random() * 0.004;
+    const freq3 = 0.02 + Math.random() * 0.01;
+    const phase1 = Math.random() * Math.PI * 2;
+    const phase2 = Math.random() * Math.PI * 2;
+    const phase3 = Math.random() * Math.PI * 2;
+
+    for (let x = 0; x < W; x++) {
+        const h1 = Math.sin(x * freq1 + phase1) * amplitude * 0.6;
+        const h2 = Math.sin(x * freq2 + phase2) * amplitude * 0.3;
+        const h3 = Math.sin(x * freq3 + phase3) * amplitude * 0.1;
+        terrain[x] = groundBase + h1 + h2 + h3;
+    }
+}
+
+function destroyTerrain(cx, cy, radius) {
+    for (let x = Math.max(0, Math.floor(cx - radius)); x <= Math.min(terrain.length - 1, Math.ceil(cx + radius)); x++) {
+        const dx = x - cx;
+        const distFromCenter = Math.abs(dx);
+        if (distFromCenter > radius) continue;
+        const depth = Math.sqrt(radius * radius - dx * dx);
+        const craterBottom = cy + depth;
+        if (craterBottom > terrain[x]) {
+            terrain[x] = craterBottom;
+        }
+    }
+}
+
+// ============================================================
+// TEAM SETUP
+// ============================================================
+function createTeams() {
+    const W = canvas.width;
+    const dogeWorms = [];
+    const kittyWorms = [];
+    const numPerTeam = 3;
+
+    // Doges on left third, Kitties on right third
+    for (let i = 0; i < numPerTeam; i++) {
+        const dx = Math.floor(W * 0.1 + (W * 0.25) * (i / (numPerTeam - 1 || 1)));
+        dogeWorms.push({ x: dx, y: 0, hp: 100, maxHp: 100, alive: true, name: ['Much Wow', 'Very Boom', 'So Aim'][i] });
+
+        const kx = Math.floor(W * 0.65 + (W * 0.25) * (i / (numPerTeam - 1 || 1)));
+        kittyWorms.push({ x: kx, y: 0, hp: 100, maxHp: 100, alive: true, name: ['Meow Mixer', 'Purrfect', 'Hiss-tory'][i] });
+    }
+
+    // Drop worms onto terrain
+    [...dogeWorms, ...kittyWorms].forEach(w => {
+        w.y = terrain[Math.floor(w.x)] - WORM_RADIUS;
+    });
+
+    teams = [
+        { name: 'DOGE TEAM', color: '#f4a832', accent: '#c98200', emoji: '🐕', worms: dogeWorms },
+        { name: 'KITTY TEAM', color: '#e576c3', accent: '#b84a9a', emoji: '🐱', worms: kittyWorms }
+    ];
+    currentTeam = 0;
+    currentWorm = [0, 0];
+}
+
+// ============================================================
+// ACTIVE WORM HELPER
+// ============================================================
+function getActiveWorm() {
+    const team = teams[currentTeam];
+    if (!team) return null;
+    // Find next alive worm starting from current index
+    const start = currentWorm[currentTeam];
+    for (let i = 0; i < team.worms.length; i++) {
+        const idx = (start + i) % team.worms.length;
+        if (team.worms[idx].alive) {
+            currentWorm[currentTeam] = idx;
+            return team.worms[idx];
+        }
+    }
+    return null;
+}
+
+// ============================================================
+// WIND
+// ============================================================
+function randomizeWind() {
+    wind = (Math.random() - 0.5) * 200;
+}
+
+function updateWindUI() {
+    const el = document.getElementById('wind-val');
+    const arrow = wind > 5 ? '→' : wind < -5 ? '←' : '·';
+    const strength = Math.abs(wind).toFixed(0);
+    el.textContent = `${arrow} ${strength}`;
+}
+
+// ============================================================
+// TURN MANAGEMENT
+// ============================================================
+function startTurn() {
+    gameState = 'aiming';
+    turnTimer = TURN_TIME;
+    moveUsed = 0;
+    charging = false;
+    chargePower = 0;
+    isAirborne = false;
+    jumpVY = 0;
+    jumpVX = 0;
+    mouseDown = false;
+    mousePower = 0;
+    document.getElementById('power-bar-container').style.display = 'none';
+    randomizeWind();
+    updateWindUI();
+
+    // Set aim direction based on team side
+    const worm = getActiveWorm();
+    if (worm) {
+        aimAngle = currentTeam === 0 ? -Math.PI / 4 : -3 * Math.PI / 4;
+        cameraPanTarget = worm.x - canvas.width / 2;
+    }
+
+    const label = document.getElementById('turn-label');
+    label.textContent = `${teams[currentTeam].emoji} ${teams[currentTeam].name}`;
+    label.style.color = teams[currentTeam].color;
+    document.getElementById('turn-box').style.borderColor = teams[currentTeam].color;
+
+    document.getElementById('power-bar-container').style.display = 'none';
+}
+
+function endTurn() {
+    if (gameState === 'firing' || gameState === 'waiting') return;
+
+    // Advance to next alive worm for this team
+    const team = teams[currentTeam];
+    let nextIdx = (currentWorm[currentTeam] + 1) % team.worms.length;
+    currentWorm[currentTeam] = nextIdx;
+
+    // Switch team
+    currentTeam = (currentTeam + 1) % 2;
+
+    // Check if next team has alive worms
+    if (!teams[currentTeam].worms.some(w => w.alive)) {
+        gameOver();
+        return;
+    }
+
+    startTurn();
+}
+
+function gameOver() {
+    gameState = 'gameOver';
+    const winnerIdx = teams[0].worms.some(w => w.alive) ? 0 : 1;
+    const el = document.getElementById('game-over');
+    const txt = document.getElementById('winner-text');
+    txt.textContent = `${teams[winnerIdx].emoji} ${teams[winnerIdx].name} WINS!`;
+    txt.style.color = teams[winnerIdx].color;
+    const btn = document.getElementById('restart-btn');
+    btn.style.color = teams[winnerIdx].color;
+    btn.style.borderColor = teams[winnerIdx].color;
+    el.style.display = 'block';
+}
+
+// ============================================================
+// PROJECTILE / EXPLOSION
+// ============================================================
+function fireProjectile(x, y, angle, power) {
+    const speed = MIN_LAUNCH_SPEED + power * (MAX_LAUNCH_SPEED - MIN_LAUNCH_SPEED);
+    projectiles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        team: currentTeam,
+        alive: true,
+        trail: []
+    });
+    gameState = 'firing';
+    playSound('fire');
+}
+
+function createExplosion(x, y, radius) {
+    explosions.push({ x, y, radius, maxRadius: radius, timer: 0, maxTime: 0.4 });
+    destroyTerrain(x, y, radius);
+    shakeTimer = 0.3;
+    shakeIntensity = 8;
+    playSound('explode');
+
+    // Damage and push worms
+    for (const team of teams) {
+        for (const worm of team.worms) {
+            if (!worm.alive) continue;
+            const dx = worm.x - x;
+            const dy = worm.y - y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < radius + WORM_RADIUS) {
+                const dmgMult = 1 - Math.min(1, dist / (radius + WORM_RADIUS));
+                const damage = Math.round(EXPLOSION_DAMAGE * (0.3 + 0.7 * dmgMult));
+                worm.hp -= damage;
+                spawnFloatingText(worm.x, worm.y - 30, `-${damage}`, '#ff4444');
+
+                // Knockback
+                if (dist > 0) {
+                    const pushForce = 120 * dmgMult;
+                    worm.x += (dx / dist) * pushForce;
+                    worm.y += (dy / dist) * pushForce * 0.5;
+                }
+
+                if (worm.hp <= 0) {
+                    worm.hp = 0;
+                    worm.alive = false;
+                    spawnFloatingText(worm.x, worm.y - 50, 'KO!', '#ffd700');
+                    playSound('ko');
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// FLOATING TEXT
+// ============================================================
+function spawnFloatingText(x, y, text, color) {
+    floatingTexts.push({ x, y, text, color, timer: 0, maxTime: 1.5 });
+}
+
+// ============================================================
+// SOUND (Web Audio)
+// ============================================================
+let audioCtx = null;
+function getAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+}
+
+function playSound(type) {
+    try {
+        const ctx = getAudio();
+        const t = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        if (type === 'fire') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(300, t);
+            osc.frequency.linearRampToValueAtTime(100, t + 0.15);
+            gain.gain.setValueAtTime(0.15, t);
+            gain.gain.linearRampToValueAtTime(0, t + 0.2);
+            osc.start(t); osc.stop(t + 0.2);
+        } else if (type === 'explode') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, t);
+            osc.frequency.linearRampToValueAtTime(30, t + 0.4);
+            gain.gain.setValueAtTime(0.25, t);
+            gain.gain.linearRampToValueAtTime(0, t + 0.4);
+            osc.start(t); osc.stop(t + 0.4);
+        } else if (type === 'ko') {
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(600, t);
+            osc.frequency.linearRampToValueAtTime(200, t + 0.3);
+            gain.gain.setValueAtTime(0.12, t);
+            gain.gain.linearRampToValueAtTime(0, t + 0.3);
+            osc.start(t); osc.stop(t + 0.3);
+        }
+    } catch (e) { /* audio not available */ }
+}
+
+// ============================================================
+// INPUT — WASD + Space Jump + Mouse Aim/Fire
+// ============================================================
+window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+
+    // SPACE = Jump / Double-tap = Backflip
+    if (e.code === 'Space' && gameState === 'aiming' && !isAirborne && !mouseDown) {
+        const now = performance.now();
+        const dt = now - lastSpaceTime;
+        const worm = getActiveWorm();
+        if (worm) {
+            if (dt < DOUBLE_TAP_MS) {
+                // BACKFLIP — mostly up, slightly back
+                jumpVY = -BACKFLIP_FORCE;
+                jumpVX = -facingDir * BACKFLIP_BACK;
+                isAirborne = true;
+                playSound('fire');
+            } else {
+                // Normal jump — up and forward at ~55 degrees
+                jumpVY = -JUMP_FORCE;
+                jumpVX = facingDir * JUMP_FORWARD;
+                isAirborne = true;
+            }
+        }
+        lastSpaceTime = now;
+        e.preventDefault();
+    }
+
+    // ENTER = End turn
+    if (e.code === 'Enter' && gameState === 'aiming') {
+        endTurn();
+        e.preventDefault();
+    }
+
+    // Track facing direction from A/D
+    if (e.code === 'KeyA') facingDir = -1;
+    if (e.code === 'KeyD') facingDir = 1;
+});
+window.addEventListener('keyup', e => {
+    keys[e.code] = false;
+});
+
+// Mouse — aim with cursor position, click+hold to charge, release to fire
+canvas.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+});
+canvas.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    if (gameState !== 'aiming') return;
+    if (isAirborne) return;
+    mouseDown = true;
+    mouseChargeStart = performance.now();
+    mousePower = 0;
+    document.getElementById('power-bar-container').style.display = 'block';
+    e.preventDefault();
+});
+canvas.addEventListener('mouseup', e => {
+    if (e.button !== 0) return;
+    if (!mouseDown) return;
+    mouseDown = false;
+
+    if (gameState === 'aiming') {
+        const worm = getActiveWorm();
+        if (worm) {
+            // Aim angle from worm to mouse (account for camera)
+            const wx = worm.x - cameraPanX;
+            const wy = worm.y;
+            const angle = Math.atan2(mouseY - wy, mouseX - wx);
+            fireProjectile(worm.x, worm.y - 5, angle, mousePower);
+        }
+    }
+    mousePower = 0;
+    document.getElementById('power-bar-container').style.display = 'none';
+    e.preventDefault();
+});
+// Prevent context menu on right click
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+    if (gameState === 'gameOver') return;
+
+    const worm = getActiveWorm();
+    if (!worm) { endTurn(); return; }
+
+    // Turn timer
+    if (gameState === 'aiming') {
+        turnTimer -= dt;
+        if (turnTimer <= 0) { turnTimer = 0; endTurn(); return; }
+    }
+    document.getElementById('timer').textContent = Math.ceil(turnTimer);
+
+    // WASD Movement (only when grounded)
+    if (gameState === 'aiming' && !isAirborne && !mouseDown) {
+        let moved = 0;
+        if (keys['KeyA'] && moveUsed < MOVE_BUDGET) {
+            worm.x -= MOVE_SPEED * dt;
+            moved = MOVE_SPEED * dt;
+        }
+        if (keys['KeyD'] && moveUsed < MOVE_BUDGET) {
+            worm.x += MOVE_SPEED * dt;
+            moved = MOVE_SPEED * dt;
+        }
+        if (moved > 0) {
+            moveUsed += moved;
+            // Snap to terrain
+            const tx = Math.floor(Math.max(0, Math.min(terrain.length - 1, worm.x)));
+            worm.y = terrain[tx] - WORM_RADIUS;
+        }
+    }
+
+    // Jump physics (airborne)
+    if (isAirborne && worm) {
+        jumpVY += GRAVITY * dt;
+        worm.x += jumpVX * dt;
+        worm.y += jumpVY * dt;
+
+        // Clamp X
+        worm.x = Math.max(WORM_RADIUS, Math.min(terrain.length - WORM_RADIUS, worm.x));
+
+        // Land on terrain
+        const tx = Math.floor(Math.max(0, Math.min(terrain.length - 1, worm.x)));
+        const groundY = terrain[tx] - WORM_RADIUS;
+        if (worm.y >= groundY && jumpVY > 0) {
+            worm.y = groundY;
+            isAirborne = false;
+            jumpVY = 0;
+            jumpVX = 0;
+            moveUsed += 30; // jumping costs some move budget
+        }
+    }
+
+    // Mouse aim angle (always track for crosshair drawing)
+    if (worm) {
+        const wx = worm.x - cameraPanX;
+        const wy = worm.y;
+        aimAngle = Math.atan2(mouseY - wy, mouseX - wx);
+    }
+
+    // Mouse charge power
+    if (mouseDown) {
+        mousePower = Math.min(1, (performance.now() - mouseChargeStart) / 2000);
+        document.getElementById('power-bar').style.width = (mousePower * 100) + '%';
+    }
+
+    // Camera follow
+    if (projectiles.length > 0) {
+        cameraPanTarget = projectiles[0].x - canvas.width / 2;
+    } else if (worm) {
+        cameraPanTarget = worm.x - canvas.width / 2;
+    }
+    cameraPanTarget = Math.max(0, Math.min(terrain.length - canvas.width, cameraPanTarget));
+    cameraPanX += (cameraPanTarget - cameraPanX) * 3 * dt;
+
+    // Projectiles
+    for (const p of projectiles) {
+        if (!p.alive) continue;
+        p.trail.push({ x: p.x, y: p.y });
+        if (p.trail.length > 20) p.trail.shift();
+
+        p.vx += wind * dt;
+        p.vy += GRAVITY * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        // Ground collision
+        const tx = Math.floor(p.x);
+        if (tx >= 0 && tx < terrain.length && p.y >= terrain[tx]) {
+            createExplosion(p.x, p.y, EXPLOSION_RADIUS);
+            p.alive = false;
+        }
+
+        // Out of bounds
+        if (p.x < -100 || p.x > terrain.length + 100 || p.y > canvas.height + 100) {
+            p.alive = false;
+        }
+    }
+
+    // Clean dead projectiles
+    const hadProjectiles = projectiles.length > 0;
+    projectiles = projectiles.filter(p => p.alive);
+    if (hadProjectiles && projectiles.length === 0 && gameState === 'firing') {
+        gameState = 'waiting';
+        setTimeout(() => {
+            // Check for game over
+            for (const team of teams) {
+                if (!team.worms.some(w => w.alive)) {
+                    gameOver();
+                    return;
+                }
+            }
+            // Settle worms onto terrain
+            settleWorms();
+            endTurn();
+        }, 800);
+    }
+
+    // Explosions
+    for (const ex of explosions) {
+        ex.timer += dt;
+    }
+    explosions = explosions.filter(e => e.timer < e.maxTime);
+
+    // Floating text
+    for (const ft of floatingTexts) {
+        ft.timer += dt;
+        ft.y -= 40 * dt;
+    }
+    floatingTexts = floatingTexts.filter(ft => ft.timer < ft.maxTime);
+
+    // Screen shake
+    if (shakeTimer > 0) shakeTimer -= dt;
+
+    // Water death check
+    for (const team of teams) {
+        for (const worm of team.worms) {
+            if (!worm.alive) continue;
+            if (worm.y > canvas.height - WATER_HEIGHT + 10) {
+                worm.alive = false;
+                worm.hp = 0;
+                spawnFloatingText(worm.x, worm.y - 40, 'SPLASH!', '#44aaff');
+                playSound('ko');
+            }
+        }
+    }
+}
+
+function settleWorms() {
+    for (const team of teams) {
+        for (const worm of team.worms) {
+            if (!worm.alive) continue;
+            const tx = Math.floor(Math.max(0, Math.min(terrain.length - 1, worm.x)));
+            const groundY = terrain[tx] - WORM_RADIUS;
+            if (worm.y < groundY) {
+                worm.y = groundY; // drop onto new terrain
+            }
+        }
+    }
+}
+
+// ============================================================
+// DRAW
+// ============================================================
+function draw() {
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Camera + shake
+    ctx.save();
+    let shakeX = 0, shakeY = 0;
+    if (shakeTimer > 0) {
+        shakeX = (Math.random() - 0.5) * shakeIntensity * 2;
+        shakeY = (Math.random() - 0.5) * shakeIntensity * 2;
+    }
+    ctx.translate(-cameraPanX + shakeX, shakeY);
+
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#0a0a2e');
+    skyGrad.addColorStop(0.5, '#1a1a4e');
+    skyGrad.addColorStop(1, '#2a1a3e');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(cameraPanX, 0, W, H);
+
+    // Stars
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    for (let i = 0; i < 80; i++) {
+        const sx = ((i * 137.5) % W + cameraPanX * 0.1) % (W + 200) - 100 + cameraPanX;
+        const sy = (i * 97.3) % (H * 0.5);
+        ctx.fillRect(sx, sy, 1.5, 1.5);
+    }
+
+    // Terrain
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x < terrain.length; x++) {
+        ctx.lineTo(x, terrain[x]);
+    }
+    ctx.lineTo(terrain.length, H);
+    ctx.closePath();
+
+    const terrGrad = ctx.createLinearGradient(0, H * 0.3, 0, H);
+    terrGrad.addColorStop(0, '#2d5a1e');
+    terrGrad.addColorStop(0.3, '#3d6a2e');
+    terrGrad.addColorStop(1, '#4a3520');
+    ctx.fillStyle = terrGrad;
+    ctx.fill();
+
+    // Grass edge
+    ctx.strokeStyle = '#4a8a2a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let x = 0; x < terrain.length; x++) {
+        if (x === 0) ctx.moveTo(x, terrain[x]);
+        else ctx.lineTo(x, terrain[x]);
+    }
+    ctx.stroke();
+
+    // Water
+    const waterY = H - WATER_HEIGHT;
+    ctx.fillStyle = 'rgba(30, 100, 200, 0.6)';
+    ctx.fillRect(cameraPanX, waterY, W, WATER_HEIGHT);
+    ctx.fillStyle = 'rgba(60, 140, 255, 0.3)';
+    ctx.fillRect(cameraPanX, waterY, W, 8);
+
+    // Projectile trails
+    for (const p of projectiles) {
+        if (p.trail.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(p.trail[0].x, p.trail[0].y);
+            for (let i = 1; i < p.trail.length; i++) {
+                ctx.lineTo(p.trail[i].x, p.trail[i].y);
+            }
+            ctx.strokeStyle = 'rgba(255, 200, 50, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+    }
+
+    // Projectiles
+    for (const p of projectiles) {
+        if (!p.alive) continue;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffd700';
+        ctx.fill();
+        ctx.strokeStyle = '#ff8800';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    // Explosions
+    for (const ex of explosions) {
+        const progress = ex.timer / ex.maxTime;
+        const r = ex.maxRadius * (0.5 + progress * 0.5);
+        const alpha = 1 - progress;
+        // Fireball
+        ctx.beginPath();
+        ctx.arc(ex.x, ex.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, ${Math.floor(150 * (1 - progress))}, 0, ${alpha * 0.6})`;
+        ctx.fill();
+        // Flash
+        ctx.beginPath();
+        ctx.arc(ex.x, ex.y, r * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 200, ${alpha * 0.8})`;
+        ctx.fill();
+    }
+
+    // Worms
+    for (let ti = 0; ti < teams.length; ti++) {
+        const team = teams[ti];
+        for (let wi = 0; wi < team.worms.length; wi++) {
+            const w = team.worms[wi];
+            if (!w.alive) continue;
+
+            const isActive = (ti === currentTeam && wi === currentWorm[currentTeam] && gameState === 'aiming');
+
+            // Body
+            ctx.beginPath();
+            ctx.arc(w.x, w.y, WORM_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = isActive ? team.color : team.accent;
+            ctx.fill();
+            ctx.strokeStyle = isActive ? '#fff' : 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = isActive ? 2.5 : 1;
+            ctx.stroke();
+
+            // Emoji face
+            ctx.font = `${WORM_RADIUS * 1.3}px serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(team.emoji, w.x, w.y);
+
+            // Name
+            ctx.font = 'bold 10px Courier New';
+            ctx.fillStyle = team.color;
+            ctx.textAlign = 'center';
+            ctx.fillText(w.name, w.x, w.y - WORM_RADIUS - 18);
+
+            // HP bar
+            const barW = 30;
+            const barH = 4;
+            const barX = w.x - barW / 2;
+            const barY = w.y - WORM_RADIUS - 12;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+            const hpRatio = w.hp / w.maxHp;
+            const hpColor = hpRatio > 0.5 ? '#4f4' : hpRatio > 0.25 ? '#ff4' : '#f44';
+            ctx.fillStyle = hpColor;
+            ctx.fillRect(barX, barY, barW * hpRatio, barH);
+
+            // Aim indicator for active worm
+            if (isActive) {
+                // Aim line toward mouse
+                const aimLen = 60;
+                const aimEndX = w.x + Math.cos(aimAngle) * aimLen;
+                const aimEndY = w.y + Math.sin(aimAngle) * aimLen;
+
+                // Dotted aim line
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(w.x, w.y - 3);
+                ctx.lineTo(aimEndX, aimEndY - 3);
+                ctx.strokeStyle = mouseDown ? 'rgba(255, 100, 50, 0.9)' : 'rgba(255, 255, 0, 0.6)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Crosshair at aim end
+                const chSize = mouseDown ? 8 : 5;
+                ctx.strokeStyle = mouseDown ? '#ff6633' : '#ffff00';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(aimEndX - chSize, aimEndY - 3); ctx.lineTo(aimEndX + chSize, aimEndY - 3);
+                ctx.moveTo(aimEndX, aimEndY - 3 - chSize); ctx.lineTo(aimEndX, aimEndY - 3 + chSize);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(aimEndX, aimEndY - 3, chSize * 0.7, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Active indicator (bouncing arrow)
+                const bounce = Math.sin(performance.now() / 300) * 4;
+                ctx.font = '16px serif';
+                ctx.fillStyle = team.color;
+                ctx.textAlign = 'center';
+                ctx.fillText('▼', w.x, w.y - WORM_RADIUS - 28 + bounce);
+
+                // Facing direction indicator
+                ctx.font = '10px Courier New';
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.fillText(facingDir > 0 ? '►' : '◄', w.x + facingDir * 20, w.y + 2);
+            }
+        }
+    }
+
+    // Floating texts
+    for (const ft of floatingTexts) {
+        const alpha = 1 - ft.timer / ft.maxTime;
+        ctx.font = 'bold 16px Courier New';
+        ctx.fillStyle = ft.color.replace(')', `,${alpha})`).replace('rgb', 'rgba');
+        if (!ft.color.startsWith('rgba')) {
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = ft.color;
+        }
+        ctx.textAlign = 'center';
+        ctx.fillText(ft.text, ft.x, ft.y);
+        ctx.globalAlpha = 1;
+    }
+
+    // Move budget indicator
+    if (gameState === 'aiming') {
+        const worm = getActiveWorm();
+        if (worm) {
+            const remaining = Math.max(0, 1 - moveUsed / MOVE_BUDGET);
+            const budgetBarW = 30;
+            const budgetBarH = 3;
+            const bx = worm.x - budgetBarW / 2;
+            const by = worm.y + WORM_RADIUS + 6;
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(bx - 1, by - 1, budgetBarW + 2, budgetBarH + 2);
+            ctx.fillStyle = `rgba(100, 200, 255, ${remaining > 0.1 ? 0.7 : 0.3})`;
+            ctx.fillRect(bx, by, budgetBarW * remaining, budgetBarH);
+        }
+    }
+
+    ctx.restore();
+
+    // Wind visualization overlay (fixed position)
+    if (Math.abs(wind) > 10) {
+        const windDir = wind > 0 ? 1 : -1;
+        const windStr = Math.abs(wind) / 200;
+        ctx.globalAlpha = windStr * 0.15;
+        for (let i = 0; i < 8; i++) {
+            const wx = ((performance.now() / 10 * windDir + i * W / 8) % W + W) % W;
+            const wy = H * 0.2 + (i * 47) % (H * 0.3);
+            ctx.strokeStyle = '#aaccff';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(wx, wy);
+            ctx.lineTo(wx + windDir * 30, wy);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+    }
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function gameLoop(timestamp) {
+    const dt = Math.min(0.05, (timestamp - lastTime) / 1000);
+    lastTime = timestamp;
+    update(dt);
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+function initGame() {
+    document.getElementById('game-over').style.display = 'none';
+    generateTerrain();
+    createTeams();
+    projectiles = [];
+    explosions = [];
+    floatingTexts = [];
+    gameState = 'aiming';
+    cameraPanX = 0;
+    startTurn();
+}
+
+initGame();
+lastTime = performance.now();
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
