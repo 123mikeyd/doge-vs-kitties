@@ -56,7 +56,7 @@ canvas { display: block; }
     <div id="wind-box" style="visibility:hidden">spacer</div>
 </div>
 <div id="power-bar-container"><div id="power-bar"></div></div>
-<div id="controls-help">A/D Move &nbsp;|&nbsp; Space = Jump &nbsp;|&nbsp; Space×2 = Backflip &nbsp;|&nbsp; Mouse Aim + Click-Hold-Release = Fire &nbsp;|&nbsp; Enter = End Turn</div>
+<div id="controls-help">A/D Move &nbsp;|&nbsp; W/S Aim &nbsp;|&nbsp; Space = Jump &nbsp;|&nbsp; Space×2 = Backflip &nbsp;|&nbsp; Click+Hold = Charge, Release = Fire &nbsp;|&nbsp; Enter = End Turn</div>
 <div id="game-over">
     <h1 id="winner-text">DOGE WINS!</h1>
     <button id="restart-btn" onclick="initGame()">Play Again</button>
@@ -138,28 +138,105 @@ let mouseChargeStart = 0;
 let mousePower = 0;
 
 // ============================================================
-// TERRAIN GENERATION
+// TERRAIN GENERATION — Midpoint displacement fractal
 // ============================================================
 function generateTerrain() {
     terrain = [];
     const W = canvas.width;
     const H = canvas.height;
-    const groundBase = H * 0.55;
-    const amplitude = H * 0.15;
+    const waterLine = H - WATER_HEIGHT;
 
-    // Layered sine waves for organic hills
-    const freq1 = 0.003 + Math.random() * 0.002;
-    const freq2 = 0.008 + Math.random() * 0.004;
-    const freq3 = 0.02 + Math.random() * 0.01;
-    const phase1 = Math.random() * Math.PI * 2;
-    const phase2 = Math.random() * Math.PI * 2;
-    const phase3 = Math.random() * Math.PI * 2;
+    // === Midpoint Displacement (Diamond-Square 1D) ===
+    // Start with endpoints, recursively subdivide with random offsets
+    const points = {};
+    const roughness = 0.65; // lower = smoother, higher = crazier
+    const baseY = H * 0.45; // average ground height
 
+    points[0] = baseY + (Math.random() - 0.5) * H * 0.15;
+    points[W - 1] = baseY + (Math.random() - 0.5) * H * 0.15;
+
+    function midpoint(left, right, spread) {
+        if (right - left < 2) return;
+        const mid = Math.floor((left + right) / 2);
+        const avg = (points[left] + points[right]) / 2;
+        points[mid] = avg + (Math.random() - 0.5) * spread;
+        const newSpread = spread * roughness;
+        midpoint(left, mid, newSpread);
+        midpoint(mid, right, newSpread);
+    }
+
+    midpoint(0, W - 1, H * 0.3);
+
+    // Fill in any gaps with linear interpolation
+    let lastDefined = 0;
     for (let x = 0; x < W; x++) {
-        const h1 = Math.sin(x * freq1 + phase1) * amplitude * 0.6;
-        const h2 = Math.sin(x * freq2 + phase2) * amplitude * 0.3;
-        const h3 = Math.sin(x * freq3 + phase3) * amplitude * 0.1;
-        terrain[x] = groundBase + h1 + h2 + h3;
+        if (points[x] !== undefined) {
+            // Interpolate from lastDefined to x
+            for (let ix = lastDefined + 1; ix < x; ix++) {
+                const t = (ix - lastDefined) / (x - lastDefined);
+                points[ix] = points[lastDefined] * (1 - t) + points[x] * t;
+            }
+            lastDefined = x;
+        }
+    }
+
+    // === Add plateaus (flat sections for worms to stand on) ===
+    const numPlateaus = 2 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < numPlateaus; i++) {
+        const px = Math.floor(W * 0.15 + Math.random() * W * 0.7);
+        const pw = 40 + Math.floor(Math.random() * 80);
+        const plateauY = points[px];
+        for (let x = Math.max(0, px - pw / 2); x < Math.min(W, px + pw / 2); x++) {
+            const blend = 1 - Math.pow(2 * Math.abs(x - px) / pw, 2);
+            points[Math.floor(x)] = points[Math.floor(x)] * (1 - blend * 0.7) + plateauY * blend * 0.7;
+        }
+    }
+
+    // === Add dramatic cliff faces ===
+    const numCliffs = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < numCliffs; i++) {
+        const cx = Math.floor(W * 0.25 + Math.random() * W * 0.5);
+        const drop = (Math.random() > 0.5 ? 1 : -1) * (60 + Math.random() * 80);
+        const steepness = 8 + Math.floor(Math.random() * 12);
+        for (let x = cx; x < Math.min(W, cx + steepness); x++) {
+            const t = (x - cx) / steepness;
+            // Smooth step
+            const s = t * t * (3 - 2 * t);
+            points[x] = points[x] + drop * s;
+        }
+        // Continue at new height
+        for (let x = cx + steepness; x < W; x++) {
+            if (points[x] !== undefined) points[x] += drop;
+        }
+    }
+
+    // === Add arches/caverns (concave dips) ===
+    const numArches = Math.floor(Math.random() * 2);
+    for (let i = 0; i < numArches; i++) {
+        const ax = Math.floor(W * 0.2 + Math.random() * W * 0.6);
+        const aw = 80 + Math.floor(Math.random() * 120);
+        const depth = 40 + Math.random() * 60;
+        for (let x = Math.max(0, ax - aw / 2); x < Math.min(W, ax + aw / 2); x++) {
+            const t = 2 * (x - ax) / aw;
+            const archShape = Math.sqrt(Math.max(0, 1 - t * t)); // semicircle
+            points[Math.floor(x)] += depth * archShape;
+        }
+    }
+
+    // === Clamp and smooth ===
+    for (let x = 0; x < W; x++) {
+        const val = points[x] !== undefined ? points[x] : baseY;
+        // Keep terrain above water but allow some near-water areas
+        terrain[x] = Math.min(waterLine - 15, Math.max(H * 0.15, val));
+    }
+
+    // Final smoothing pass
+    const smooth = [...terrain];
+    for (let pass = 0; pass < 3; pass++) {
+        for (let x = 2; x < W - 2; x++) {
+            smooth[x] = (terrain[x - 2] + terrain[x - 1] + terrain[x] + terrain[x + 1] + terrain[x + 2]) / 5;
+        }
+        for (let x = 2; x < W - 2; x++) terrain[x] = smooth[x];
     }
 }
 
@@ -273,7 +350,7 @@ function startTurn() {
 }
 
 function endTurn() {
-    if (gameState === 'firing' || gameState === 'waiting') return;
+    if (gameState === 'firing') return; // only block during active projectile flight
 
     // Advance to next alive worm for this team
     const team = teams[currentTeam];
@@ -453,11 +530,7 @@ window.addEventListener('keyup', e => {
     keys[e.code] = false;
 });
 
-// Mouse — aim with cursor position, click+hold to charge, release to fire
-canvas.addEventListener('mousemove', e => {
-    mouseX = e.clientX;
-    mouseY = e.clientY;
-});
+// Mouse — click+hold to charge power, release to fire at current aim angle
 canvas.addEventListener('mousedown', e => {
     if (e.button !== 0) return;
     if (gameState !== 'aiming') return;
@@ -476,11 +549,7 @@ canvas.addEventListener('mouseup', e => {
     if (gameState === 'aiming') {
         const worm = getActiveWorm();
         if (worm) {
-            // Aim angle from worm to mouse (account for camera)
-            const wx = worm.x - cameraPanX;
-            const wy = worm.y;
-            const angle = Math.atan2(mouseY - wy, mouseX - wx);
-            fireProjectile(worm.x, worm.y - 5, angle, mousePower);
+            fireProjectile(worm.x, worm.y - 5, aimAngle, mousePower);
         }
     }
     mousePower = 0;
@@ -506,7 +575,7 @@ function update(dt) {
     }
     document.getElementById('timer').textContent = Math.ceil(turnTimer);
 
-    // WASD Movement (only when grounded)
+    // A/D Movement (only when grounded and not charging)
     if (gameState === 'aiming' && !isAirborne && !mouseDown) {
         let moved = 0;
         if (keys['KeyA'] && moveUsed < MOVE_BUDGET) {
@@ -523,6 +592,15 @@ function update(dt) {
             const tx = Math.floor(Math.max(0, Math.min(terrain.length - 1, worm.x)));
             worm.y = terrain[tx] - WORM_RADIUS;
         }
+    }
+
+    // W/S Aim — rotate crosshair around the worm (full 360)
+    if (gameState === 'aiming') {
+        if (keys['KeyW']) aimAngle -= AIM_SPEED * dt;
+        if (keys['KeyS']) aimAngle += AIM_SPEED * dt;
+        // Wrap angle to keep it in -PI to PI range
+        if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
+        if (aimAngle < -Math.PI) aimAngle += Math.PI * 2;
     }
 
     // Jump physics (airborne)
@@ -544,13 +622,6 @@ function update(dt) {
             jumpVX = 0;
             moveUsed += 30; // jumping costs some move budget
         }
-    }
-
-    // Mouse aim angle (always track for crosshair drawing)
-    if (worm) {
-        const wx = worm.x - cameraPanX;
-        const wy = worm.y;
-        aimAngle = Math.atan2(mouseY - wy, mouseX - wx);
     }
 
     // Mouse charge power
@@ -607,6 +678,8 @@ function update(dt) {
             }
             // Settle worms onto terrain
             settleWorms();
+            // Set state to allow endTurn to proceed
+            gameState = 'aiming';
             endTurn();
         }, 800);
     }
