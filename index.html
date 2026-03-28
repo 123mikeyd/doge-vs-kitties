@@ -241,13 +241,16 @@ function generateTerrain() {
         terrain[x] = Math.min(waterLine - 15, Math.max(H * 0.15, val));
     }
 
-    // Final smoothing pass
-    const smooth = [...terrain];
-    for (let pass = 0; pass < 3; pass++) {
-        for (let x = 2; x < W - 2; x++) {
-            smooth[x] = (terrain[x - 2] + terrain[x - 1] + terrain[x] + terrain[x + 1] + terrain[x + 2]) / 5;
+    // Heavy smoothing — kill the pointy bits
+    for (let pass = 0; pass < 12; pass++) {
+        const smooth = [...terrain];
+        const r = 4; // wider kernel = rounder hills
+        for (let x = r; x < W - r; x++) {
+            let sum = 0;
+            for (let k = -r; k <= r; k++) sum += terrain[x + k];
+            smooth[x] = sum / (r * 2 + 1);
         }
-        for (let x = 2; x < W - 2; x++) terrain[x] = smooth[x];
+        for (let x = r; x < W - r; x++) terrain[x] = smooth[x];
     }
 }
 
@@ -889,7 +892,7 @@ function draw() {
         ctx.fillRect(sx, sy, 1.5, 1.5);
     }
 
-    // Terrain
+    // Terrain — brown earth fill
     ctx.beginPath();
     ctx.moveTo(0, H);
     for (let x = 0; x < terrain.length; x++) {
@@ -898,16 +901,35 @@ function draw() {
     ctx.lineTo(terrain.length, H);
     ctx.closePath();
 
-    const terrGrad = ctx.createLinearGradient(0, H * 0.3, 0, H);
-    terrGrad.addColorStop(0, '#2d5a1e');
-    terrGrad.addColorStop(0.3, '#3d6a2e');
-    terrGrad.addColorStop(1, '#4a3520');
-    ctx.fillStyle = terrGrad;
+    // Brown earth body
+    const earthGrad = ctx.createLinearGradient(0, H * 0.3, 0, H);
+    earthGrad.addColorStop(0, '#6b3a1f');
+    earthGrad.addColorStop(0.3, '#5a2d15');
+    earthGrad.addColorStop(0.6, '#4a2410');
+    earthGrad.addColorStop(1, '#3a1a0a');
+    ctx.fillStyle = earthGrad;
     ctx.fill();
 
-    // Grass edge
-    ctx.strokeStyle = '#4a8a2a';
-    ctx.lineWidth = 3;
+    // Green grass top layer — thick strip following the terrain surface
+    const grassDepth = 12;
+    ctx.beginPath();
+    ctx.moveTo(0, terrain[0] + grassDepth);
+    for (let x = 0; x < terrain.length; x++) {
+        ctx.lineTo(x, terrain[x] + grassDepth);
+    }
+    for (let x = terrain.length - 1; x >= 0; x--) {
+        ctx.lineTo(x, terrain[x]);
+    }
+    ctx.closePath();
+    const grassGrad = ctx.createLinearGradient(0, 0, 0, H);
+    grassGrad.addColorStop(0, '#3a9a2a');
+    grassGrad.addColorStop(1, '#2d7a1e');
+    ctx.fillStyle = grassGrad;
+    ctx.fill();
+
+    // Bright grass edge highlight on top
+    ctx.strokeStyle = '#5abf3a';
+    ctx.lineWidth = 2;
     ctx.beginPath();
     for (let x = 0; x < terrain.length; x++) {
         if (x === 0) ctx.moveTo(x, terrain[x]);
