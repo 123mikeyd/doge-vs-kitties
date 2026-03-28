@@ -269,12 +269,12 @@ function destroyTerrain(cx, cy, radius) {
         }
     }
 
-    // Punch hole in the terrain texture
+    // Punch hole in the terrain texture (slightly larger to catch grass edge)
     if (terrainCtx) {
         terrainCtx.save();
         terrainCtx.globalCompositeOperation = 'destination-out';
         terrainCtx.beginPath();
-        terrainCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+        terrainCtx.arc(cx, cy, radius + 8, 0, Math.PI * 2);
         terrainCtx.fill();
         terrainCtx.restore();
     }
