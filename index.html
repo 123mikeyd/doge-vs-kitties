@@ -101,6 +101,8 @@ const BACKFLIP_BACK = 80;
 // GAME STATE
 // ============================================================
 let terrain = []; // heightmap: terrain[x] = y of ground surface
+let terrainCanvas = null; // offscreen canvas for pre-rendered terrain texture
+let terrainCtx = null;
 let teams = []; // [{name, color, accent, emoji, worms: [{x, y, hp, maxHp, alive}]}]
 let currentTeam = 0;
 let currentWorm = [0, 0]; // index per team
@@ -255,6 +257,7 @@ function generateTerrain() {
 }
 
 function destroyTerrain(cx, cy, radius) {
+    // Update heightmap
     for (let x = Math.max(0, Math.floor(cx - radius)); x <= Math.min(terrain.length - 1, Math.ceil(cx + radius)); x++) {
         const dx = x - cx;
         const distFromCenter = Math.abs(dx);
@@ -264,6 +267,103 @@ function destroyTerrain(cx, cy, radius) {
         if (craterBottom > terrain[x]) {
             terrain[x] = craterBottom;
         }
+    }
+
+    // Punch hole in the terrain texture
+    if (terrainCtx) {
+        terrainCtx.save();
+        terrainCtx.globalCompositeOperation = 'destination-out';
+        terrainCtx.beginPath();
+        terrainCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+        terrainCtx.fill();
+        terrainCtx.restore();
+    }
+}
+
+// ============================================================
+// TERRAIN TEXTURE — pre-rendered offscreen canvas
+// ============================================================
+function renderTerrainTexture() {
+    const W = canvas.width;
+    const H = canvas.height;
+
+    terrainCanvas = document.createElement('canvas');
+    terrainCanvas.width = W;
+    terrainCanvas.height = H;
+    terrainCtx = terrainCanvas.getContext('2d');
+
+    // Fill the terrain shape
+    terrainCtx.beginPath();
+    terrainCtx.moveTo(0, H);
+    for (let x = 0; x < terrain.length; x++) {
+        terrainCtx.lineTo(x, terrain[x]);
+    }
+    terrainCtx.lineTo(terrain.length, H);
+    terrainCtx.closePath();
+    terrainCtx.clip(); // only draw inside terrain shape
+
+    // Layer 1: Deep rock (bottom)
+    const rockGrad = terrainCtx.createLinearGradient(0, H * 0.6, 0, H);
+    rockGrad.addColorStop(0, '#5a4030');
+    rockGrad.addColorStop(0.5, '#4a3525');
+    rockGrad.addColorStop(1, '#3a2a1a');
+    terrainCtx.fillStyle = rockGrad;
+    terrainCtx.fillRect(0, 0, W, H);
+
+    // Layer 2: Dirt (middle) — follows terrain contour
+    for (let x = 0; x < W; x++) {
+        const groundY = terrain[x];
+        const dirtTop = groundY + 15;
+        const dirtHeight = H - dirtTop;
+        if (dirtHeight > 0) {
+            // Slightly varied brown
+            const shade = 60 + Math.sin(x * 0.05) * 10;
+            terrainCtx.fillStyle = `rgb(${shade + 30}, ${shade - 10}, ${shade - 30})`;
+            terrainCtx.fillRect(x, dirtTop, 1, dirtHeight);
+        }
+    }
+
+    // Layer 3: Topsoil (just below grass)
+    for (let x = 0; x < W; x++) {
+        const groundY = terrain[x];
+        terrainCtx.fillStyle = '#6b4a2a';
+        terrainCtx.fillRect(x, groundY + 5, 1, 10);
+    }
+
+    // Layer 4: Green grass (top strip)
+    for (let x = 0; x < W; x++) {
+        const groundY = terrain[x];
+        // Grass — varied green
+        const g = 130 + Math.sin(x * 0.1) * 20 + Math.sin(x * 0.03) * 15;
+        terrainCtx.fillStyle = `rgb(${40 + Math.sin(x*0.07)*10}, ${Math.floor(g)}, ${30 + Math.sin(x*0.09)*8})`;
+        terrainCtx.fillRect(x, groundY, 1, 6);
+        // Lighter grass highlight on very top
+        terrainCtx.fillStyle = `rgb(${60 + Math.sin(x*0.13)*15}, ${Math.floor(g + 30)}, ${40})`;
+        terrainCtx.fillRect(x, groundY, 1, 2);
+    }
+
+    // Layer 5: Random pebbles/rocks in the dirt
+    terrainCtx.fillStyle = '#7a6a5a';
+    for (let i = 0; i < 200; i++) {
+        const rx = Math.random() * W;
+        const groundY = terrain[Math.floor(rx)] || H * 0.5;
+        const ry = groundY + 20 + Math.random() * (H - groundY - 80);
+        const rw = 2 + Math.random() * 4;
+        const rh = 1 + Math.random() * 3;
+        terrainCtx.fillRect(rx, ry, rw, rh);
+    }
+
+    // Layer 6: Subtle horizontal dirt strata lines
+    terrainCtx.strokeStyle = 'rgba(80, 60, 40, 0.3)';
+    terrainCtx.lineWidth = 1;
+    for (let sy = H * 0.4; sy < H; sy += 15 + Math.random() * 20) {
+        terrainCtx.beginPath();
+        for (let x = 0; x < W; x += 3) {
+            const wobble = Math.sin(x * 0.02 + sy * 0.1) * 3;
+            if (x === 0) terrainCtx.moveTo(x, sy + wobble);
+            else terrainCtx.lineTo(x, sy + wobble);
+        }
+        terrainCtx.stroke();
     }
 }
 
@@ -1217,50 +1317,10 @@ function draw() {
         ctx.fillRect(sx, sy, 1.5, 1.5);
     }
 
-    // Terrain — brown earth fill
-    ctx.beginPath();
-    ctx.moveTo(0, H);
-    for (let x = 0; x < terrain.length; x++) {
-        ctx.lineTo(x, terrain[x]);
+    // Terrain — pre-rendered texture (explosions punch holes in it)
+    if (terrainCanvas) {
+        ctx.drawImage(terrainCanvas, 0, 0);
     }
-    ctx.lineTo(terrain.length, H);
-    ctx.closePath();
-
-    // Brown earth body
-    const earthGrad = ctx.createLinearGradient(0, H * 0.3, 0, H);
-    earthGrad.addColorStop(0, '#6b3a1f');
-    earthGrad.addColorStop(0.3, '#5a2d15');
-    earthGrad.addColorStop(0.6, '#4a2410');
-    earthGrad.addColorStop(1, '#3a1a0a');
-    ctx.fillStyle = earthGrad;
-    ctx.fill();
-
-    // Green grass top layer — thick strip following the terrain surface
-    const grassDepth = 12;
-    ctx.beginPath();
-    ctx.moveTo(0, terrain[0] + grassDepth);
-    for (let x = 0; x < terrain.length; x++) {
-        ctx.lineTo(x, terrain[x] + grassDepth);
-    }
-    for (let x = terrain.length - 1; x >= 0; x--) {
-        ctx.lineTo(x, terrain[x]);
-    }
-    ctx.closePath();
-    const grassGrad = ctx.createLinearGradient(0, 0, 0, H);
-    grassGrad.addColorStop(0, '#3a9a2a');
-    grassGrad.addColorStop(1, '#2d7a1e');
-    ctx.fillStyle = grassGrad;
-    ctx.fill();
-
-    // Bright grass edge highlight on top
-    ctx.strokeStyle = '#5abf3a';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    for (let x = 0; x < terrain.length; x++) {
-        if (x === 0) ctx.moveTo(x, terrain[x]);
-        else ctx.lineTo(x, terrain[x]);
-    }
-    ctx.stroke();
 
     // Water
     const waterY = H - WATER_HEIGHT;
@@ -1458,6 +1518,7 @@ function gameLoop(timestamp) {
 function initGame() {
     document.getElementById('game-over').style.display = 'none';
     generateTerrain();
+    renderTerrainTexture();
     createTeams();
     projectiles = [];
     explosions = [];
