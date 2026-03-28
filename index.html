@@ -520,18 +520,17 @@ window.addEventListener('keydown', e => {
     keys[e.code] = true;
 
     // SPACE = Jump / Double-tap = Backflip
-    if (e.code === 'Space' && gameState === 'aiming' && !isAirborne && !mouseDown) {
+    if (e.code === 'Space' && gameState === 'aiming' && !mouseDown) {
         const now = performance.now();
-        const dt = now - lastSpaceTime;
+        const timeSinceLast = now - lastSpaceTime;
         const worm = getActiveWorm();
         if (worm) {
-            if (dt < DOUBLE_TAP_MS) {
-                // BACKFLIP — mostly up, slightly back
+            if (timeSinceLast < DOUBLE_TAP_MS && isAirborne) {
+                // BACKFLIP — override the initial jump mid-air
                 jumpVY = -BACKFLIP_FORCE;
                 jumpVX = -facingDir * BACKFLIP_BACK;
-                isAirborne = true;
                 playSound('fire');
-            } else {
+            } else if (!isAirborne) {
                 // Normal jump — up and forward at ~55 degrees
                 jumpVY = -JUMP_FORCE;
                 jumpVX = facingDir * JUMP_FORWARD;
