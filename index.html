@@ -269,12 +269,14 @@ function destroyTerrain(cx, cy, radius) {
         }
     }
 
-    // Punch hole in the terrain texture (slightly larger to catch grass edge)
+    // Punch hole in the terrain texture
+    // Use a tall ellipse that extends well above the crater to catch all grass pixels
     if (terrainCtx) {
         terrainCtx.save();
         terrainCtx.globalCompositeOperation = 'destination-out';
         terrainCtx.beginPath();
-        terrainCtx.arc(cx, cy, radius + 8, 0, Math.PI * 2);
+        // Ellipse: wider than crater horizontally, extends 20px above vertically
+        terrainCtx.ellipse(cx, cy - 5, radius + 4, radius + 20, 0, 0, Math.PI * 2);
         terrainCtx.fill();
         terrainCtx.restore();
     }
