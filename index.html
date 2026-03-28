@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Doge vs Crypto Kitties — Artillery Showdown</title>
+<title>Public Domain Showdown — Artillery Brawl</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #0a0a1a; overflow: hidden; font-family: 'Courier New', monospace; }
@@ -268,31 +268,354 @@ function destroyTerrain(cx, cy, radius) {
 }
 
 // ============================================================
+// CHARACTER DEFINITIONS
+// ============================================================
+const CHARACTERS = {
+    popeye:     { name: 'Popeye',      team: 0, color: '#2266cc', accent: '#1a4f99' },
+    willie:     { name: 'S.Willie',    team: 0, color: '#333333', accent: '#1a1a1a' },
+    peterpan:   { name: 'Peter Pan',   team: 0, color: '#22aa44', accent: '#188833' },
+    pluto:      { name: 'Pluto',       team: 0, color: '#cc8833', accent: '#aa6622' },
+    franken:    { name: 'Franken',     team: 1, color: '#447744', accent: '#2a552a' },
+    dracula:    { name: 'Dracula',     team: 1, color: '#662244', accent: '#441133' },
+    eviltigger: { name: 'Evil Tigger', team: 1, color: '#cc6600', accent: '#993300' },
+    evilpooh:   { name: 'Evil Pooh',   team: 1, color: '#aa7722', accent: '#885511' },
+};
+
+// ============================================================
+// CHARACTER SPRITE DRAWING
+// ============================================================
+function drawCharacter(ctx, x, y, charId, facing, t, isActive, isMoving) {
+    const S = WORM_RADIUS; // base scale ~14px
+    const bob = isMoving ? Math.sin(t * 12) * 2 : Math.sin(t * 2) * 0.5; // walk bob vs idle breathe
+    ctx.save();
+    ctx.translate(x, y + bob);
+    ctx.scale(facing, 1); // flip for facing direction
+
+    switch(charId) {
+    case 'popeye': {
+        // Sailor hat
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-6, -S-6, 12, 4);
+        ctx.fillStyle = '#2266cc';
+        ctx.fillRect(-4, -S-10, 8, 5);
+        // Head
+        ctx.fillStyle = '#f0c8a0';
+        ctx.beginPath(); ctx.arc(0, -S+4, 7, 0, Math.PI*2); ctx.fill();
+        // Squinty eye
+        ctx.fillStyle = '#000';
+        ctx.fillRect(2, -S+2, 3, 2);
+        // Pipe
+        ctx.strokeStyle = '#8B4513';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(6, -S+6); ctx.lineTo(12, -S+3); ctx.lineTo(12, -S-1); ctx.stroke();
+        // Body (sailor shirt)
+        ctx.fillStyle = '#2266cc';
+        ctx.fillRect(-6, -S+10, 12, 10);
+        // Big forearm
+        const armPump = Math.sin(t * 3) * 0.5;
+        ctx.fillStyle = '#f0c8a0';
+        ctx.beginPath(); ctx.ellipse(8, -S+8+armPump, 6, 4, 0.3, 0, Math.PI*2); ctx.fill();
+        // Legs
+        ctx.fillStyle = '#111';
+        ctx.fillRect(-4, -S+20, 3, 6);
+        ctx.fillRect(1, -S+20, 3, 6);
+        break;
+    }
+    case 'willie': {
+        // Steamboat Willie - black & white pie-eye mouse
+        // Ears
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.arc(-5, -S-4, 5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(5, -S-4, 5, 0, Math.PI*2); ctx.fill();
+        // Head
+        ctx.fillStyle = '#222';
+        ctx.beginPath(); ctx.arc(0, -S+4, 7, 0, Math.PI*2); ctx.fill();
+        // Pie eyes (white circles with black dots)
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.ellipse(-3, -S+2, 3, 4, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(3, -S+2, 3, 4, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(-2, -S+3, 1.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(4, -S+3, 1.5, 0, Math.PI*2); ctx.fill();
+        // Snout
+        ctx.fillStyle = '#f0c8a0';
+        ctx.beginPath(); ctx.ellipse(3, -S+7, 4, 2.5, 0, 0, Math.PI*2); ctx.fill();
+        // Body
+        ctx.fillStyle = '#222';
+        ctx.fillRect(-5, -S+10, 10, 10);
+        // Buttons
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(0, -S+13, 1.2, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(0, -S+17, 1.2, 0, Math.PI*2); ctx.fill();
+        // Legs (shorts)
+        ctx.fillStyle = '#444';
+        const legAnim = isMoving ? Math.sin(t*14)*3 : 0;
+        ctx.fillRect(-4, -S+20, 3, 6+legAnim);
+        ctx.fillRect(1, -S+20, 3, 6-legAnim);
+        // Shoes
+        ctx.fillStyle = '#cc8800';
+        ctx.fillRect(-5, -S+26+legAnim, 4, 2);
+        ctx.fillRect(0, -S+26-legAnim, 4, 2);
+        break;
+    }
+    case 'peterpan': {
+        // Hat (triangle with feather)
+        ctx.fillStyle = '#22aa44';
+        ctx.beginPath(); ctx.moveTo(0, -S-12); ctx.lineTo(-7, -S-1); ctx.lineTo(7, -S-1); ctx.closePath(); ctx.fill();
+        // Feather
+        ctx.strokeStyle = '#ff4444';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(3, -S-10); ctx.quadraticCurveTo(10, -S-15, 8, -S-6); ctx.stroke();
+        // Head
+        ctx.fillStyle = '#f0c8a0';
+        ctx.beginPath(); ctx.arc(0, -S+4, 6, 0, Math.PI*2); ctx.fill();
+        // Smirk
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(0, -S+5, 3, 0.1, Math.PI-0.1); ctx.stroke();
+        // Eyes
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(-2, -S+2, 1, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, -S+2, 1, 0, Math.PI*2); ctx.fill();
+        // Tunic
+        ctx.fillStyle = '#22aa44';
+        ctx.beginPath(); ctx.moveTo(-7, -S+9); ctx.lineTo(7, -S+9); ctx.lineTo(5, -S+22); ctx.lineTo(-5, -S+22); ctx.closePath(); ctx.fill();
+        // Belt
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(-6, -S+14, 12, 2);
+        // Legs (tights)
+        ctx.fillStyle = '#33bb55';
+        ctx.fillRect(-3, -S+22, 2, 5);
+        ctx.fillRect(1, -S+22, 2, 5);
+        break;
+    }
+    case 'pluto': {
+        // Pluto - four-legged dog, drawn from side
+        const legCycle = isMoving ? Math.sin(t*14)*4 : 0;
+        // Body (horizontal oval)
+        ctx.fillStyle = '#cc8833';
+        ctx.beginPath(); ctx.ellipse(0, -S+8, 10, 6, 0, 0, Math.PI*2); ctx.fill();
+        // Head
+        ctx.fillStyle = '#cc8833';
+        ctx.beginPath(); ctx.arc(9, -S+2, 6, 0, Math.PI*2); ctx.fill();
+        // Ear (floppy)
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.ellipse(12, -S+1, 3, 6, 0.3, 0, Math.PI*2); ctx.fill();
+        // Eye
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(10, -S, 2.5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(10.5, -S+0.5, 1.2, 0, Math.PI*2); ctx.fill();
+        // Nose
+        ctx.fillStyle = '#222';
+        ctx.beginPath(); ctx.ellipse(14, -S+3, 2, 1.5, 0, 0, Math.PI*2); ctx.fill();
+        // Tongue
+        ctx.fillStyle = '#ee4466';
+        ctx.beginPath(); ctx.ellipse(13, -S+6, 1.5, 2, 0.2, 0, Math.PI*2); ctx.fill();
+        // Legs (4 legs)
+        ctx.fillStyle = '#cc8833';
+        ctx.fillRect(-7, -S+13, 3, 7+legCycle);
+        ctx.fillRect(-3, -S+13, 3, 7-legCycle);
+        ctx.fillRect(3, -S+13, 3, 7-legCycle);
+        ctx.fillRect(7, -S+13, 3, 7+legCycle);
+        // Tail
+        const tailWag = Math.sin(t*8)*0.4;
+        ctx.strokeStyle = '#cc8833'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(-9, -S+5);
+        ctx.quadraticCurveTo(-14, -S-5+tailWag*10, -11, -S-2); ctx.stroke();
+        break;
+    }
+    case 'franken': {
+        // Flat top head
+        ctx.fillStyle = '#558855';
+        ctx.fillRect(-7, -S-6, 14, 6);
+        // Head
+        ctx.fillStyle = '#669966';
+        ctx.beginPath(); ctx.arc(0, -S+4, 7, 0, Math.PI*2); ctx.fill();
+        ctx.fillRect(-7, -S-2, 14, 6);
+        // Bolts
+        ctx.fillStyle = '#888';
+        ctx.fillRect(-10, -S+2, 4, 3);
+        ctx.fillRect(6, -S+2, 4, 3);
+        // Stitches on forehead
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(-3, -S-2); ctx.lineTo(-3, -S+2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(3, -S-2); ctx.lineTo(3, -S+2); ctx.stroke();
+        // Eyes (sunken)
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-4, -S+1, 3, 3);
+        ctx.fillRect(1, -S+1, 3, 3);
+        ctx.fillStyle = '#ff3300';
+        ctx.beginPath(); ctx.arc(-2.5, -S+2.5, 0.8, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(2.5, -S+2.5, 0.8, 0, Math.PI*2); ctx.fill();
+        // Mouth (grim line)
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(-4, -S+8); ctx.lineTo(4, -S+8); ctx.stroke();
+        // Massive body
+        ctx.fillStyle = '#334433';
+        ctx.fillRect(-8, -S+10, 16, 14);
+        // Legs
+        ctx.fillStyle = '#222';
+        ctx.fillRect(-5, -S+24, 4, 5);
+        ctx.fillRect(1, -S+24, 4, 5);
+        break;
+    }
+    case 'dracula': {
+        // Cape (behind)
+        ctx.fillStyle = '#440022';
+        ctx.beginPath(); ctx.moveTo(-10, -S+2); ctx.lineTo(10, -S+2);
+        ctx.lineTo(12, -S+28); ctx.lineTo(-12, -S+28); ctx.closePath(); ctx.fill();
+        // Cape inner lining
+        ctx.fillStyle = '#880033';
+        ctx.beginPath(); ctx.moveTo(-7, -S+5); ctx.lineTo(7, -S+5);
+        ctx.lineTo(8, -S+25); ctx.lineTo(-8, -S+25); ctx.closePath(); ctx.fill();
+        // Head
+        ctx.fillStyle = '#ddd8cc';
+        ctx.beginPath(); ctx.arc(0, -S+4, 6, 0, Math.PI*2); ctx.fill();
+        // Widow's peak hair
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.moveTo(-6, -S); ctx.lineTo(0, -S+2); ctx.lineTo(6, -S);
+        ctx.lineTo(6, -S-5); ctx.lineTo(0, -S-7); ctx.lineTo(-6, -S-5); ctx.closePath(); ctx.fill();
+        // Red eyes
+        ctx.fillStyle = '#ff0000';
+        ctx.beginPath(); ctx.arc(-2, -S+3, 1.3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, -S+3, 1.3, 0, Math.PI*2); ctx.fill();
+        // Fangs
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.moveTo(-2, -S+8); ctx.lineTo(-1, -S+11); ctx.lineTo(0, -S+8); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(1, -S+8); ctx.lineTo(2, -S+11); ctx.lineTo(3, -S+8); ctx.fill();
+        // Body (suit)
+        ctx.fillStyle = '#111';
+        ctx.fillRect(-5, -S+10, 10, 12);
+        // Shirt front
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(-1, -S+10, 2, 8);
+        // Legs
+        ctx.fillStyle = '#111';
+        ctx.fillRect(-4, -S+22, 3, 6);
+        ctx.fillRect(1, -S+22, 3, 6);
+        break;
+    }
+    case 'eviltigger': {
+        // Evil Tigger — slashed stripes, manic eyes
+        // Body (spring-loaded, slightly crouched)
+        const springBob = isMoving ? Math.abs(Math.sin(t*16))*3 : 0;
+        ctx.fillStyle = '#cc6600';
+        ctx.beginPath(); ctx.ellipse(0, -S+8-springBob, 7, 9, 0, 0, Math.PI*2); ctx.fill();
+        // Dark stripes
+        ctx.strokeStyle = '#331100'; ctx.lineWidth = 2;
+        for (let i = -2; i <= 2; i++) {
+            ctx.beginPath(); ctx.moveTo(i*3-1, -S+2-springBob); ctx.lineTo(i*3+1, -S+14-springBob); ctx.stroke();
+        }
+        // Head
+        ctx.fillStyle = '#dd7711';
+        ctx.beginPath(); ctx.arc(0, -S+0, 7, 0, Math.PI*2); ctx.fill();
+        // Ears (pointy)
+        ctx.fillStyle = '#cc6600';
+        ctx.beginPath(); ctx.moveTo(-5, -S-4); ctx.lineTo(-7, -S-10); ctx.lineTo(-1, -S-4); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(5, -S-4); ctx.lineTo(7, -S-10); ctx.lineTo(1, -S-4); ctx.closePath(); ctx.fill();
+        // MANIC eyes (red, wide)
+        ctx.fillStyle = '#ff0000';
+        ctx.beginPath(); ctx.arc(-3, -S-1, 2.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, -S-1, 2.5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(-3, -S-1, 1, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, -S-1, 1, 0, Math.PI*2); ctx.fill();
+        // Manic grin
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(0, -S+2, 4, 0.2, Math.PI-0.2); ctx.stroke();
+        // Scar across face
+        ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(-5, -S-3); ctx.lineTo(5, -S+4); ctx.stroke();
+        // Tail (spring-like)
+        ctx.strokeStyle = '#cc6600'; ctx.lineWidth = 3;
+        const tailT = Math.sin(t*6)*0.5;
+        ctx.beginPath(); ctx.moveTo(-6, -S+10-springBob);
+        ctx.bezierCurveTo(-14, -S+5+tailT*8, -10, -S-5, -8, -S-2); ctx.stroke();
+        // Legs
+        ctx.fillStyle = '#cc6600';
+        ctx.fillRect(-4, -S+16-springBob, 3, 5+springBob);
+        ctx.fillRect(1, -S+16-springBob, 3, 5+springBob);
+        break;
+    }
+    case 'evilpooh': {
+        // Evil Pooh — honey-crazed, red eyes, dripping
+        // Body (round bear)
+        ctx.fillStyle = '#aa7722';
+        ctx.beginPath(); ctx.ellipse(0, -S+10, 8, 9, 0, 0, Math.PI*2); ctx.fill();
+        // Dark red tattered shirt
+        ctx.fillStyle = '#880000';
+        ctx.fillRect(-6, -S+5, 12, 8);
+        ctx.fillStyle = '#660000';
+        // Rips in shirt
+        ctx.fillRect(-6, -S+8, 2, 5);
+        ctx.fillRect(4, -S+6, 2, 4);
+        // Head
+        ctx.fillStyle = '#bb8833';
+        ctx.beginPath(); ctx.arc(0, -S+2, 7, 0, Math.PI*2); ctx.fill();
+        // Small round ears
+        ctx.fillStyle = '#996622';
+        ctx.beginPath(); ctx.arc(-6, -S-3, 3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(6, -S-3, 3, 0, Math.PI*2); ctx.fill();
+        // RED GLOWING EYES
+        ctx.fillStyle = '#ff0000';
+        ctx.beginPath(); ctx.arc(-3, -S+1, 2, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, -S+1, 2, 0, Math.PI*2); ctx.fill();
+        // Glow effect
+        ctx.fillStyle = `rgba(255,0,0,${0.3+Math.sin(t*4)*0.15})`;
+        ctx.beginPath(); ctx.arc(-3, -S+1, 4, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, -S+1, 4, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(-3, -S+1, 0.8, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, -S+1, 0.8, 0, Math.PI*2); ctx.fill();
+        // Snout + grimace
+        ctx.fillStyle = '#cc9944';
+        ctx.beginPath(); ctx.ellipse(0, -S+5, 3, 2, 0, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(-3, -S+7); ctx.quadraticCurveTo(0, -S+9, 3, -S+7); ctx.stroke();
+        // Honey dripping from mouth
+        ctx.fillStyle = '#ddaa00';
+        const drip = Math.sin(t*3)*2;
+        ctx.beginPath(); ctx.ellipse(-1, -S+9+drip, 1.5, 3, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(2, -S+10+drip*0.7, 1, 2, 0, 0, Math.PI*2); ctx.fill();
+        // Legs
+        ctx.fillStyle = '#aa7722';
+        ctx.fillRect(-4, -S+18, 3, 6);
+        ctx.fillRect(1, -S+18, 3, 6);
+        break;
+    }
+    }
+    ctx.restore();
+}
+
+// ============================================================
 // TEAM SETUP
 // ============================================================
 function createTeams() {
     const W = canvas.width;
-    const dogeWorms = [];
-    const kittyWorms = [];
-    const numPerTeam = 3;
 
-    // Doges on left third, Kitties on right third
-    for (let i = 0; i < numPerTeam; i++) {
-        const dx = Math.floor(W * 0.1 + (W * 0.25) * (i / (numPerTeam - 1 || 1)));
-        dogeWorms.push({ x: dx, y: 0, hp: 100, maxHp: 100, alive: true, name: ['Much Wow', 'Very Boom', 'So Aim'][i] });
+    const heroChars = ['popeye', 'willie', 'peterpan', 'pluto'];
+    const villainChars = ['franken', 'dracula', 'eviltigger', 'evilpooh'];
 
-        const kx = Math.floor(W * 0.65 + (W * 0.25) * (i / (numPerTeam - 1 || 1)));
-        kittyWorms.push({ x: kx, y: 0, hp: 100, maxHp: 100, alive: true, name: ['Meow Mixer', 'Purrfect', 'Hiss-tory'][i] });
-    }
+    const heroWorms = heroChars.map((id, i) => ({
+        x: Math.floor(W * 0.05 + (W * 0.3) * (i / (heroChars.length - 1))),
+        y: 0, hp: 100, maxHp: 100, alive: true,
+        name: CHARACTERS[id].name, charId: id
+    }));
 
-    // Drop worms onto terrain
-    [...dogeWorms, ...kittyWorms].forEach(w => {
+    const villainWorms = villainChars.map((id, i) => ({
+        x: Math.floor(W * 0.65 + (W * 0.3) * (i / (villainChars.length - 1))),
+        y: 0, hp: 100, maxHp: 100, alive: true,
+        name: CHARACTERS[id].name, charId: id
+    }));
+
+    // Drop onto terrain
+    [...heroWorms, ...villainWorms].forEach(w => {
         w.y = terrain[Math.floor(w.x)] - WORM_RADIUS;
     });
 
     teams = [
-        { name: 'DOGE TEAM', color: '#f4a832', accent: '#c98200', emoji: '🐕', worms: dogeWorms },
-        { name: 'KITTY TEAM', color: '#e576c3', accent: '#b84a9a', emoji: '🐱', worms: kittyWorms }
+        { name: 'HEROES', color: '#44aaff', accent: '#2277cc', worms: heroWorms },
+        { name: 'VILLAINS', color: '#ff4444', accent: '#cc2222', worms: villainWorms }
     ];
     currentTeam = 0;
     currentWorm = [0, 0];
@@ -359,8 +682,10 @@ function startTurn() {
         cameraPanTarget = worm.x - canvas.width / 2;
     }
 
+    const wormForLabel = getActiveWorm();
+    const charName = wormForLabel ? wormForLabel.name : '';
     const label = document.getElementById('turn-label');
-    label.textContent = `${teams[currentTeam].emoji} ${teams[currentTeam].name}`;
+    label.textContent = `${teams[currentTeam].name} — ${charName}`;
     label.style.color = teams[currentTeam].color;
     document.getElementById('turn-box').style.borderColor = teams[currentTeam].color;
 
@@ -399,7 +724,7 @@ function gameOver() {
     const winnerIdx = teams[0].worms.some(w => w.alive) ? 0 : 1;
     const el = document.getElementById('game-over');
     const txt = document.getElementById('winner-text');
-    txt.textContent = `${teams[winnerIdx].emoji} ${teams[winnerIdx].name} WINS!`;
+    txt.textContent = `${teams[winnerIdx].name} WIN!`;
     txt.style.color = teams[winnerIdx].color;
     const btn = document.getElementById('restart-btn');
     btn.style.color = teams[winnerIdx].color;
@@ -987,33 +1312,25 @@ function draw() {
         ctx.fill();
     }
 
-    // Worms
+    // Characters
+    const now = performance.now() / 1000;
     for (let ti = 0; ti < teams.length; ti++) {
         const team = teams[ti];
         for (let wi = 0; wi < team.worms.length; wi++) {
             const w = team.worms[wi];
             if (!w.alive) continue;
 
-            const isActive = (ti === currentTeam && wi === currentWorm[currentTeam] && gameState === 'aiming');
+            const isActive = (ti === currentTeam && wi === currentWorm[currentTeam] &&
+                (gameState === 'aiming' || gameState === 'aiTurn'));
+            const isCurrentlyMoving = isActive && (keys['KeyA'] || keys['KeyD']) && !isAirborne;
+            const charFacing = isActive ? facingDir : (ti === 0 ? 1 : -1);
 
-            // Body
-            ctx.beginPath();
-            ctx.arc(w.x, w.y, WORM_RADIUS, 0, Math.PI * 2);
-            ctx.fillStyle = isActive ? team.color : team.accent;
-            ctx.fill();
-            ctx.strokeStyle = isActive ? '#fff' : 'rgba(255,255,255,0.3)';
-            ctx.lineWidth = isActive ? 2.5 : 1;
-            ctx.stroke();
-
-            // Emoji face
-            ctx.font = `${WORM_RADIUS * 1.3}px serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(team.emoji, w.x, w.y);
+            // Draw character sprite
+            drawCharacter(ctx, w.x, w.y, w.charId, charFacing, now, isActive, isCurrentlyMoving);
 
             // Name
-            ctx.font = 'bold 10px Courier New';
-            ctx.fillStyle = team.color;
+            ctx.font = 'bold 9px Courier New';
+            ctx.fillStyle = isActive ? '#fff' : team.color;
             ctx.textAlign = 'center';
             ctx.fillText(w.name, w.x, w.y - WORM_RADIUS - 18);
 
