@@ -269,14 +269,12 @@ function destroyTerrain(cx, cy, radius) {
         }
     }
 
-    // Punch hole in the terrain texture
-    // Use a tall ellipse that extends well above the crater to catch all grass pixels
+    // Punch hole in terrain texture — clean circle, no clip path to fight
     if (terrainCtx) {
         terrainCtx.save();
         terrainCtx.globalCompositeOperation = 'destination-out';
         terrainCtx.beginPath();
-        // Ellipse: wider than crater horizontally, extends 20px above vertically
-        terrainCtx.ellipse(cx, cy - 5, radius + 4, radius + 20, 0, 0, Math.PI * 2);
+        terrainCtx.arc(cx, cy, radius + 2, 0, Math.PI * 2);
         terrainCtx.fill();
         terrainCtx.restore();
     }
@@ -289,28 +287,19 @@ function renderTerrainTexture() {
     const W = canvas.width;
     const H = canvas.height;
 
-    terrainCanvas = document.createElement('canvas');
-    terrainCanvas.width = W;
-    terrainCanvas.height = H;
-    terrainCtx = terrainCanvas.getContext('2d');
+    // Step 1: Build full-screen texture layers on a temp canvas (no clipping)
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = W;
+    tmpCanvas.height = H;
+    const tmp = tmpCanvas.getContext('2d');
 
-    // Fill the terrain shape
-    terrainCtx.beginPath();
-    terrainCtx.moveTo(0, H);
-    for (let x = 0; x < terrain.length; x++) {
-        terrainCtx.lineTo(x, terrain[x]);
-    }
-    terrainCtx.lineTo(terrain.length, H);
-    terrainCtx.closePath();
-    terrainCtx.clip(); // only draw inside terrain shape
-
-    // Layer 1: Deep rock (bottom)
-    const rockGrad = terrainCtx.createLinearGradient(0, H * 0.6, 0, H);
+    // Layer 1: Deep rock (fills entire canvas)
+    const rockGrad = tmp.createLinearGradient(0, H * 0.3, 0, H);
     rockGrad.addColorStop(0, '#5a4030');
     rockGrad.addColorStop(0.5, '#4a3525');
     rockGrad.addColorStop(1, '#3a2a1a');
-    terrainCtx.fillStyle = rockGrad;
-    terrainCtx.fillRect(0, 0, W, H);
+    tmp.fillStyle = rockGrad;
+    tmp.fillRect(0, 0, W, H);
 
     // Layer 2: Dirt (middle) — follows terrain contour
     for (let x = 0; x < W; x++) {
@@ -318,55 +307,77 @@ function renderTerrainTexture() {
         const dirtTop = groundY + 15;
         const dirtHeight = H - dirtTop;
         if (dirtHeight > 0) {
-            // Slightly varied brown
             const shade = 60 + Math.sin(x * 0.05) * 10;
-            terrainCtx.fillStyle = `rgb(${shade + 30}, ${shade - 10}, ${shade - 30})`;
-            terrainCtx.fillRect(x, dirtTop, 1, dirtHeight);
+            tmp.fillStyle = `rgb(${shade + 30}, ${shade - 10}, ${shade - 30})`;
+            tmp.fillRect(x, dirtTop, 1, dirtHeight);
         }
     }
 
     // Layer 3: Topsoil (just below grass)
     for (let x = 0; x < W; x++) {
         const groundY = terrain[x];
-        terrainCtx.fillStyle = '#6b4a2a';
-        terrainCtx.fillRect(x, groundY + 5, 1, 10);
+        tmp.fillStyle = '#6b4a2a';
+        tmp.fillRect(x, groundY + 5, 1, 10);
     }
 
     // Layer 4: Green grass (top strip)
     for (let x = 0; x < W; x++) {
         const groundY = terrain[x];
-        // Grass — varied green
         const g = 130 + Math.sin(x * 0.1) * 20 + Math.sin(x * 0.03) * 15;
-        terrainCtx.fillStyle = `rgb(${40 + Math.sin(x*0.07)*10}, ${Math.floor(g)}, ${30 + Math.sin(x*0.09)*8})`;
-        terrainCtx.fillRect(x, groundY, 1, 6);
+        tmp.fillStyle = `rgb(${40 + Math.sin(x*0.07)*10}, ${Math.floor(g)}, ${30 + Math.sin(x*0.09)*8})`;
+        tmp.fillRect(x, groundY, 1, 6);
         // Lighter grass highlight on very top
-        terrainCtx.fillStyle = `rgb(${60 + Math.sin(x*0.13)*15}, ${Math.floor(g + 30)}, ${40})`;
-        terrainCtx.fillRect(x, groundY, 1, 2);
+        tmp.fillStyle = `rgb(${60 + Math.sin(x*0.13)*15}, ${Math.floor(g + 30)}, ${40})`;
+        tmp.fillRect(x, groundY, 1, 2);
     }
 
     // Layer 5: Random pebbles/rocks in the dirt
-    terrainCtx.fillStyle = '#7a6a5a';
+    tmp.fillStyle = '#7a6a5a';
     for (let i = 0; i < 200; i++) {
         const rx = Math.random() * W;
         const groundY = terrain[Math.floor(rx)] || H * 0.5;
         const ry = groundY + 20 + Math.random() * (H - groundY - 80);
         const rw = 2 + Math.random() * 4;
         const rh = 1 + Math.random() * 3;
-        terrainCtx.fillRect(rx, ry, rw, rh);
+        tmp.fillRect(rx, ry, rw, rh);
     }
 
     // Layer 6: Subtle horizontal dirt strata lines
-    terrainCtx.strokeStyle = 'rgba(80, 60, 40, 0.3)';
-    terrainCtx.lineWidth = 1;
+    tmp.strokeStyle = 'rgba(80, 60, 40, 0.3)';
+    tmp.lineWidth = 1;
     for (let sy = H * 0.4; sy < H; sy += 15 + Math.random() * 20) {
-        terrainCtx.beginPath();
+        tmp.beginPath();
         for (let x = 0; x < W; x += 3) {
             const wobble = Math.sin(x * 0.02 + sy * 0.1) * 3;
-            if (x === 0) terrainCtx.moveTo(x, sy + wobble);
-            else terrainCtx.lineTo(x, sy + wobble);
+            if (x === 0) tmp.moveTo(x, sy + wobble);
+            else tmp.lineTo(x, sy + wobble);
         }
-        terrainCtx.stroke();
+        tmp.stroke();
     }
+
+    // Step 2: Create the ACTUAL terrain canvas — terrain shape as alpha mask
+    terrainCanvas = document.createElement('canvas');
+    terrainCanvas.width = W;
+    terrainCanvas.height = H;
+    terrainCtx = terrainCanvas.getContext('2d');
+
+    // Draw terrain shape as solid white (defines where pixels exist)
+    terrainCtx.fillStyle = '#fff';
+    terrainCtx.beginPath();
+    terrainCtx.moveTo(0, H);
+    for (let x = 0; x < terrain.length; x++) {
+        terrainCtx.lineTo(x, terrain[x]);
+    }
+    terrainCtx.lineTo(terrain.length, H);
+    terrainCtx.closePath();
+    terrainCtx.fill();
+
+    // Stamp the texture ONLY where the terrain shape exists
+    terrainCtx.globalCompositeOperation = 'source-in';
+    terrainCtx.drawImage(tmpCanvas, 0, 0);
+    terrainCtx.globalCompositeOperation = 'source-over';
+
+    // Now terrainCtx has NO clip path — destination-out will work freely
 }
 
 // ============================================================
@@ -701,13 +712,15 @@ function createTeams() {
     const heroWorms = heroChars.map((id, i) => ({
         x: Math.floor(W * 0.05 + (W * 0.3) * (i / (heroChars.length - 1))),
         y: 0, hp: 100, maxHp: 100, alive: true,
-        name: CHARACTERS[id].name, charId: id
+        name: CHARACTERS[id].name, charId: id,
+        kbVX: 0, kbVY: 0, kbAirborne: false
     }));
 
     const villainWorms = villainChars.map((id, i) => ({
         x: Math.floor(W * 0.65 + (W * 0.3) * (i / (villainChars.length - 1))),
         y: 0, hp: 100, maxHp: 100, alive: true,
-        name: CHARACTERS[id].name, charId: id
+        name: CHARACTERS[id].name, charId: id,
+        kbVX: 0, kbVY: 0, kbAirborne: false
     }));
 
     // Drop onto terrain
@@ -802,7 +815,7 @@ function startTurn() {
 }
 
 function endTurn() {
-    if (gameState === 'firing') return;
+    if (gameState === 'firing' || gameState === 'retreat' || gameState === 'postShot') return;
 
     // Advance to next alive worm for this team
     const team = teams[currentTeam];
@@ -872,11 +885,12 @@ function createExplosion(x, y, radius) {
                 worm.hp -= damage;
                 spawnFloatingText(worm.x, worm.y - 30, `-${damage}`, '#ff4444');
 
-                // Knockback
+                // Knockback — launch worm into the air
                 if (dist > 0) {
-                    const pushForce = 120 * dmgMult;
-                    worm.x += (dx / dist) * pushForce;
-                    worm.y += (dy / dist) * pushForce * 0.5;
+                    const pushForce = 250 + 200 * dmgMult;
+                    worm.kbVX = (dx / dist) * pushForce;
+                    worm.kbVY = (dy / dist) * pushForce - 150; // always launch upward a bit
+                    worm.kbAirborne = true;
                 }
 
                 // Track hit worm for camera zoom
@@ -1066,11 +1080,20 @@ function update(dt) {
         const tx = Math.floor(Math.max(0, Math.min(terrain.length - 1, worm.x)));
         const groundY = terrain[tx] - WORM_RADIUS;
         if (worm.y >= groundY && jumpVY > 0) {
+            // Fall damage from player jump
+            if (jumpVY > 250) {
+                const fallDmg = Math.round((jumpVY - 250) * 0.06);
+                if (fallDmg > 0) {
+                    worm.hp -= fallDmg;
+                    spawnFloatingText(worm.x, worm.y - 30, `-${fallDmg} FALL`, '#ff8844');
+                    if (worm.hp <= 0) { worm.hp = 0; worm.alive = false; spawnFloatingText(worm.x, worm.y - 50, 'KO!', '#ffd700'); playSound('ko'); }
+                }
+            }
             worm.y = groundY;
             isAirborne = false;
             jumpVY = 0;
             jumpVX = 0;
-            moveUsed += 30; // jumping costs some move budget
+            moveUsed += 30;
         }
     }
 
@@ -1081,11 +1104,10 @@ function update(dt) {
     }
 
     // ============================================================
-    // AI TURN LOGIC (Kitties)
+    // AI TURN LOGIC (Villains)
     // ============================================================
     if (gameState === 'aiTurn' && worm) {
         if (aiPhase === 'thinking') {
-            // Brief pause — "thinking"
             aiThinkTimer -= dt;
             if (aiThinkTimer <= 0) {
                 // Pick a target: nearest alive enemy worm
@@ -1098,35 +1120,92 @@ function update(dt) {
                     if (d < bestDist) { bestDist = d; bestTarget = ew; }
                 }
 
+                // Decide whether to reposition first
+                // Check if terrain between us and target blocks the shot
+                let shouldMove = false;
+                let aiMoveDir = 0;
+                let aiMoveAmount = 0;
+
                 if (bestTarget) {
-                    // Calculate firing solution with some inaccuracy
                     const dx = bestTarget.x - worm.x;
-                    const dy = bestTarget.y - worm.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    // Check for hill in the way — sample terrain between us and target
+                    const checkDir = Math.sign(dx);
+                    const steps = Math.min(20, Math.abs(Math.floor(dx / 10)));
+                    let blocked = false;
+                    for (let s = 1; s <= steps; s++) {
+                        const checkX = Math.floor(worm.x + checkDir * s * 10);
+                        if (checkX >= 0 && checkX < terrain.length) {
+                            // If terrain between us is higher than both us and target, we're blocked
+                            if (terrain[checkX] < worm.y - 30 && terrain[checkX] < bestTarget.y - 30) {
+                                blocked = true;
+                                break;
+                            }
+                        }
+                    }
 
-                    // Estimate angle and power using projectile physics
-                    // Simple approach: aim at target with gravity compensation
-                    const targetSpeed = MIN_LAUNCH_SPEED + 0.6 * (MAX_LAUNCH_SPEED - MIN_LAUNCH_SPEED);
-                    const t = dist / targetSpeed; // rough time of flight
-                    const compensatedDY = dy - 0.5 * GRAVITY * t * t; // compensate for gravity drop
-                    const compensatedDX = dx - wind * t * 0.5; // compensate for wind
-
-                    aiTargetAngle = Math.atan2(compensatedDY, compensatedDX);
-                    aiTargetPower = Math.min(0.9, Math.max(0.3, dist / 800));
-
-                    // Add inaccuracy (AI isn't perfect)
-                    aiTargetAngle += (Math.random() - 0.5) * 0.15;
-                    aiTargetPower += (Math.random() - 0.5) * 0.12;
-                    aiTargetPower = Math.max(0.2, Math.min(1, aiTargetPower));
-                } else {
-                    // No target, fire randomly
-                    aiTargetAngle = -Math.PI / 4 + (Math.random() - 0.5) * 0.5;
-                    aiTargetPower = 0.5;
+                    if (blocked) {
+                        // Move away from the hill to get a clear shot
+                        shouldMove = true;
+                        aiMoveDir = -checkDir; // move opposite direction from target
+                        aiMoveAmount = 40 + Math.random() * 60;
+                    } else if (Math.random() < 0.3) {
+                        // 30% chance to reposition anyway — keeps AI unpredictable
+                        shouldMove = true;
+                        aiMoveDir = (Math.random() > 0.5 ? 1 : -1);
+                        aiMoveAmount = 20 + Math.random() * 40;
+                    }
                 }
 
-                aiPhase = 'aiming';
-                aiThinkTimer = 0;
+                if (shouldMove) {
+                    aiPhase = 'moving';
+                    aiThinkTimer = aiMoveAmount / MOVE_SPEED; // time to walk that distance
+                    worm._aiMoveDir = aiMoveDir;
+                    worm._aiBestTarget = bestTarget;
+                } else {
+                    worm._aiBestTarget = bestTarget;
+                    aiPhase = 'calcShot';
+                }
             }
+        }
+
+        if (aiPhase === 'moving') {
+            // AI walks to reposition
+            aiThinkTimer -= dt;
+            const dir = worm._aiMoveDir || 1;
+            worm.x += dir * MOVE_SPEED * dt;
+            worm.x = Math.max(WORM_RADIUS, Math.min(terrain.length - WORM_RADIUS, worm.x));
+            const tx = Math.floor(Math.max(0, Math.min(terrain.length - 1, worm.x)));
+            worm.y = terrain[tx] - WORM_RADIUS;
+
+            if (aiThinkTimer <= 0) {
+                aiPhase = 'calcShot';
+            }
+        }
+
+        if (aiPhase === 'calcShot') {
+            const bestTarget = worm._aiBestTarget;
+            if (bestTarget) {
+                const dx = bestTarget.x - worm.x;
+                const dy = bestTarget.y - worm.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                const targetSpeed = MIN_LAUNCH_SPEED + 0.6 * (MAX_LAUNCH_SPEED - MIN_LAUNCH_SPEED);
+                const t = dist / targetSpeed;
+                const compensatedDY = dy - 0.5 * GRAVITY * t * t;
+                const compensatedDX = dx - wind * t * 0.5;
+
+                aiTargetAngle = Math.atan2(compensatedDY, compensatedDX);
+                aiTargetPower = Math.min(0.9, Math.max(0.3, dist / 800));
+
+                // Inaccuracy
+                aiTargetAngle += (Math.random() - 0.5) * 0.15;
+                aiTargetPower += (Math.random() - 0.5) * 0.12;
+                aiTargetPower = Math.max(0.2, Math.min(1, aiTargetPower));
+            } else {
+                aiTargetAngle = -Math.PI / 4 + (Math.random() - 0.5) * 0.5;
+                aiTargetPower = 0.5;
+            }
+            aiPhase = 'aiming';
         }
 
         if (aiPhase === 'aiming') {
@@ -1196,9 +1275,14 @@ function update(dt) {
     const hadProjectiles = projectiles.length > 0;
     projectiles = projectiles.filter(p => p.alive);
     if (hadProjectiles && projectiles.length === 0 && gameState === 'firing') {
-        // Projectile landed — enter post-shot phase
-        gameState = 'postShot';
-        postShotTimer = 1.2; // 1.2 seconds of pause (camera zoom on hit, damage settle)
+        // Projectile landed — retreat (player gets 3s) or quick pause (AI)
+        if (isAI[currentTeam]) {
+            gameState = 'postShot';
+            postShotTimer = 1.0;
+        } else {
+            gameState = 'retreat';
+            postShotTimer = 3.0;
+        }
         settleWorms();
 
         // Check for game over
@@ -1210,15 +1294,36 @@ function update(dt) {
         }
     }
 
-    // Post-shot countdown — camera lingers, then turn ends
+    // Retreat phase — 3 seconds to reposition after your shot
+    if (gameState === 'retreat') {
+        postShotTimer -= dt;
+
+        // Allow movement during retreat (player only, not AI)
+        if (!isAI[currentTeam] && worm && !isAirborne) {
+            if (keys['KeyA']) { worm.x -= MOVE_SPEED * dt; facingDir = -1; }
+            if (keys['KeyD']) { worm.x += MOVE_SPEED * dt; facingDir = 1; }
+            const tx = Math.floor(Math.max(0, Math.min(terrain.length - 1, worm.x)));
+            worm.y = terrain[tx] - WORM_RADIUS;
+        }
+
+        // Show retreat timer
+        document.getElementById('timer').textContent = '⏱' + Math.ceil(postShotTimer);
+
+        if (postShotTimer <= 0) {
+            // Brief camera pause on hit target, then end turn
+            gameState = 'postShot';
+            postShotTimer = 0.8;
+        }
+    }
+
+    // Post-shot — brief camera linger on whoever got hit, then end turn
     if (gameState === 'postShot') {
         postShotTimer -= dt;
-        // Camera zoom toward last explosion or hit worm
         if (postShotTarget) {
             cameraPanTarget = postShotTarget.x - canvas.width / 2;
         }
         if (postShotTimer <= 0) {
-            gameState = 'aiming'; // allow endTurn to proceed
+            gameState = 'aiming';
             endTurn();
         }
     }
@@ -1258,6 +1363,48 @@ function update(dt) {
 
     // Screen shake
     if (shakeTimer > 0) shakeTimer -= dt;
+
+    // Knockback physics — ALL worms, not just active one
+    for (const team of teams) {
+        for (const w of team.worms) {
+            if (!w.alive || !w.kbAirborne) continue;
+
+            w.kbVY += GRAVITY * dt;
+            w.x += w.kbVX * dt;
+            w.y += w.kbVY * dt;
+
+            // Air drag
+            w.kbVX *= 0.995;
+
+            // Clamp X
+            w.x = Math.max(WORM_RADIUS, Math.min(terrain.length - WORM_RADIUS, w.x));
+
+            // Land on terrain
+            const tx = Math.floor(Math.max(0, Math.min(terrain.length - 1, w.x)));
+            const groundY = terrain[tx] - WORM_RADIUS;
+            if (w.y >= groundY && w.kbVY > 0) {
+                // Fall damage — based on downward velocity
+                const fallSpeed = w.kbVY;
+                if (fallSpeed > 200) {
+                    const fallDmg = Math.round((fallSpeed - 200) * 0.08);
+                    if (fallDmg > 0) {
+                        w.hp -= fallDmg;
+                        spawnFloatingText(w.x, w.y - 30, `-${fallDmg} FALL`, '#ff8844');
+                        if (w.hp <= 0) {
+                            w.hp = 0;
+                            w.alive = false;
+                            spawnFloatingText(w.x, w.y - 50, 'KO!', '#ffd700');
+                            playSound('ko');
+                        }
+                    }
+                }
+                w.y = groundY;
+                w.kbAirborne = false;
+                w.kbVX = 0;
+                w.kbVY = 0;
+            }
+        }
+    }
 
     // Water death check
     for (const team of teams) {
